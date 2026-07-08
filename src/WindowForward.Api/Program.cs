@@ -54,7 +54,10 @@ if (Directory.Exists(webRoot))
 }
 
 app.MapGet("/api/rules", async (AppDbContext db) =>
-    await db.ForwardRules.OrderByDescending(x => x.UpdatedAt).ToListAsync());
+{
+    var rules = await db.ForwardRules.AsNoTracking().ToListAsync();
+    return rules.OrderByDescending(x => x.UpdatedAt).ToList();
+});
 
 app.MapGet("/api/rules/{id:int}", async (int id, AppDbContext db) =>
 {
