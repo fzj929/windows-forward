@@ -67,6 +67,15 @@ export interface CommandExecutionLog {
   executedAt: string
 }
 
+export interface CommandResult {
+  success: boolean
+  message: string
+  output: string
+  processId?: number
+  exitCode?: number
+  commandText: string
+}
+
 export async function listRules() {
   const { data } = await axios.get<ForwardRule[]>('/api/rules')
   return data
@@ -106,5 +115,10 @@ export async function listCommandLogs(take = 30) {
   const { data } = await axios.get<CommandExecutionLog[]>('/api/command-logs', {
     params: { take }
   })
+  return data
+}
+
+export async function showPortProxy() {
+  const { data } = await axios.get<ApiResponse<CommandResult>>('/api/portproxy')
   return data
 }

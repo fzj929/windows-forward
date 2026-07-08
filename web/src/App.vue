@@ -11,8 +11,10 @@ import {
   ForwardRuleType,
   listCommandLogs,
   listRules,
+  showPortProxy,
   updateRule,
   validateRule,
+  type CommandResult,
   type CommandExecutionLog,
   type FieldError,
   type ForwardRule,
@@ -37,8 +39,10 @@ const protocolOptions = [
 
 const rules = ref<ForwardRule[]>([])
 const commandLogs = ref<CommandExecutionLog[]>([])
+const portProxyResult = ref<CommandResult>()
 const loading = ref(false)
 const logsLoading = ref(false)
+const portProxyLoading = ref(false)
 const saving = ref(false)
 const applyingId = ref<number>()
 const preview = ref('')
@@ -162,6 +166,19 @@ async function refreshLogs() {
   }
 }
 
+async function refreshPortProxy() {
+  portProxyLoading.value = true
+  try {
+    const result = await showPortProxy()
+    portProxyResult.value = result.data
+    await refreshLogs()
+  } catch (error) {
+    surfaceError(error)
+  } finally {
+    portProxyLoading.value = false
+  }
+}
+
 async function previewCommand() {
   try {
     const result = await validateRule({ ...form })
@@ -212,6 +229,7 @@ async function toggle(rule: ForwardRule) {
     ElMessage.success(result.message)
     await refresh()
     await refreshLogs()
+    await refreshPortProxy()
   } catch (error) {
     surfaceError(error)
   } finally {
@@ -236,6 +254,7 @@ async function remove(rule: ForwardRule) {
 
 onMounted(refresh)
 onMounted(refreshLogs)
+onMounted(refreshPortProxy)
 </script>
 
 <template>
@@ -394,6 +413,26 @@ onMounted(refreshLogs)
       </el-card>
     </section>
 
+    <el-card class="portproxy-panel" shadow="never">
+      <template #header>
+        <div class="card-head">
+          <div>
+            <strong>系统 portproxy 配置</strong>
+            <p>执行 <code>netsh interface portproxy show all</code>，查看 Windows 当前真实生效的端口转发规则。</p>
+          </div>
+          <el-button :icon="Refresh" :loading="portProxyLoading" @click="refreshPortProxy">刷新配置</el-button>
+        </div>
+      </template>
+
+      <div class="portproxy-status">
+        <el-tag :type="portProxyResult?.success ? 'success' : 'info'" effect="dark">
+          {{ portProxyResult ? `返回码 ${portProxyResult.exitCode ?? '-'}` : '未执行' }}
+        </el-tag>
+        <span>{{ portProxyResult?.message ?? '点击刷新配置读取系统 portproxy。' }}</span>
+      </div>
+      <pre class="command-code">{{ portProxyResult?.output?.trim() || '当前没有读取到 portproxy 规则。' }}</pre>
+    </el-card>
+
     <el-card class="log-panel" shadow="never">
       <template #header>
         <div class="card-head">
@@ -512,6 +551,7 @@ h1 {
 
 .editor,
 .rules,
+.portproxy-panel,
 .log-panel {
   border: 1px solid var(--line);
   background: var(--panel);
@@ -520,6 +560,18 @@ h1 {
 
 .log-panel {
   margin-top: 18px;
+}
+
+.portproxy-panel {
+  margin-top: 18px;
+}
+
+.portproxy-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: var(--muted);
 }
 
 .card-head {

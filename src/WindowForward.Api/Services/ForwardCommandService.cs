@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using WindowForward.Api.Data;
 using WindowForward.Api.Models;
 
@@ -12,7 +13,7 @@ public sealed class ForwardCommandService(AppDbContext db)
     {
         var input = FromEntity(rule);
         var result = await RunPowerShellAsync(BuildCommands(input, true));
-        await LogAsync(rule, "启用", result);
+        await LogAsync(rule, rule.Name, "启用", result);
         return result;
     }
 
@@ -22,13 +23,20 @@ public sealed class ForwardCommandService(AppDbContext db)
             rule.RuntimeProcessId is not null)
         {
             var sshResult = await RunPowerShellAsync(new[] { $"Stop-Process -Id {rule.RuntimeProcessId} -Force -ErrorAction Stop" });
-            await LogAsync(rule, "禁用", sshResult);
+            await LogAsync(rule, rule.Name, "禁用", sshResult);
             return sshResult;
         }
 
         var input = FromEntity(rule);
         var result = await RunPowerShellAsync(BuildCommands(input, false));
-        await LogAsync(rule, "禁用", result);
+        await LogAsync(rule, rule.Name, "禁用", result);
+        return result;
+    }
+
+    public async Task<CommandResult> ShowPortProxyAsync()
+    {
+        var result = await RunPowerShellAsync(new[] { "netsh interface portproxy show all" });
+        await LogAsync(null, "系统 portproxy", "查看", result);
         return result;
     }
 
@@ -128,10 +136,11 @@ public sealed class ForwardCommandService(AppDbContext db)
             return new(true, "无需执行系统命令。", string.Empty, null, null, string.Join(Environment.NewLine, commandList));
         }
 
+        var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
         var startInfo = new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command {Ps(script)}",
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedScript}",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -155,12 +164,12 @@ public sealed class ForwardCommandService(AppDbContext db)
             : new(false, "系统命令执行失败，请确认服务以管理员权限运行。", combined, null, process.ExitCode, script);
     }
 
-    private async Task LogAsync(ForwardRule rule, string action, CommandResult result)
+    private async Task LogAsync(ForwardRule? rule, string ruleName, string action, CommandResult result)
     {
         db.CommandExecutionLogs.Add(new CommandExecutionLog
         {
-            ForwardRuleId = rule.Id,
-            RuleName = rule.Name,
+            ForwardRuleId = rule?.Id,
+            RuleName = ruleName,
             Action = action,
             CommandText = result.CommandText,
             Success = result.Success,

@@ -90,6 +90,14 @@ app.MapGet("/api/command-logs", async (int? take, AppDbContext db) =>
         .ToList();
 });
 
+app.MapGet("/api/portproxy", async (ForwardCommandService commandService) =>
+{
+    var result = await commandService.ShowPortProxyAsync();
+    return result.Success
+        ? Results.Ok(ApiResponse.Ok(result, "已读取系统 portproxy 配置。"))
+        : Results.BadRequest(ApiResponse.Fail(result.Message, result));
+});
+
 app.MapPost("/api/rules/validate", (ForwardRuleInput input, ForwardRuleValidator validator) =>
 {
     var result = validator.Validate(input);
