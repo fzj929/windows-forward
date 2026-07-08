@@ -63,6 +63,22 @@ http://localhost:5000
 .\scripts\deploy.ps1 -PublishDir D:\apps\WindowsForward
 ```
 
+## 分步发布
+
+只发布后台程序到 `.\publish`，不配置、不启动 Windows 服务：
+
+```powershell
+.\scripts\01-publish-api.ps1
+```
+
+只发布前端页面到 `.\publish\wwwroot`：
+
+```powershell
+.\scripts\02-publish-web.ps1
+```
+
+按顺序执行这两个脚本即可更新发布目录里的后台和页面文件。
+
 ## 安装为 Windows 服务
 
 转发命令通常需要管理员权限。请在管理员 PowerShell 中执行：
