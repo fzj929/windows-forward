@@ -1,0 +1,47 @@
+:root {
+  color: #1d2522;
+  background: #edf1ea;
+  font-family: "Aptos", "Microsoft YaHei UI", "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  --ink: #17211d;
+  --muted: #68756f;
+  --line: rgba(23, 33, 29, 0.12);
+  --panel: rgba(255, 255, 250, 0.84);
+  --accent: #137c5b;
+  --accent-2: #d2742f;
+  --danger: #bd3a3a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    linear-gradient(120deg, rgba(19, 124, 91, 0.12), transparent 36%),
+    radial-gradient(circle at 84% 12%, rgba(210, 116, 47, 0.18), transparent 24rem),
+    repeating-linear-gradient(90deg, rgba(23, 33, 29, 0.035) 0 1px, transparent 1px 48px),
+    #edf1ea;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.el-card {
+  border-radius: 8px;
+}
+
+.el-button {
+  font-weight: 650;
+}
+
+.el-table {
+  --el-table-header-bg-color: #f6f4ec;
+}
