@@ -78,4 +78,4 @@ dotnet publish .\src\WindowForward.Api\WindowForward.Api.csproj -c Release -o .\
 .\scripts\uninstall-service.ps1
 ```
 
-SQLite 数据库默认位于后端运行目录的 `App_Data/window-forward.db`。
+SQLite 数据库默认位于后台程序所在目录的 `App_Data/window-forward.db`。

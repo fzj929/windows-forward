@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using WindowForward.Api.Data;
 using WindowForward.Api.Models;
 using WindowForward.Api.Services;
@@ -7,8 +8,17 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Host.UseWindowsService(options => options.ServiceName = "Windows Forward Manager");
 
+var applicationBasePath = AppContext.BaseDirectory;
+var connectionString = builder.Configuration.GetConnectionString("Default") ??
+    "Data Source=App_Data/window-forward.db";
+var sqliteConnection = new SqliteConnectionStringBuilder(connectionString);
+if (!Path.IsPathRooted(sqliteConnection.DataSource))
+{
+    sqliteConnection.DataSource = Path.Combine(applicationBasePath, sqliteConnection.DataSource);
+}
+
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("Default")));
+    options.UseSqlite(sqliteConnection.ConnectionString));
 builder.Services.AddScoped<ForwardRuleValidator>();
 builder.Services.AddScoped<ForwardCommandService>();
 builder.Services.AddCors(options =>
@@ -19,7 +29,11 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "App_Data"));
+var dbDirectory = Path.GetDirectoryName(sqliteConnection.DataSource);
+if (!string.IsNullOrWhiteSpace(dbDirectory))
+{
+    Directory.CreateDirectory(dbDirectory);
+}
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -28,7 +42,11 @@ using (var scope = app.Services.CreateScope())
 
 app.UseCors();
 
-var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+var webRoot = app.Environment.WebRootPath;
+if (string.IsNullOrWhiteSpace(webRoot) || !Directory.Exists(webRoot))
+{
+    webRoot = Path.Combine(applicationBasePath, "wwwroot");
+}
 if (Directory.Exists(webRoot))
 {
     app.UseDefaultFiles();
