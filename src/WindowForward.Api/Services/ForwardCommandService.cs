@@ -150,7 +150,7 @@ public sealed class ForwardCommandService
     private static string SshTarget(ForwardRuleInput rule) =>
         string.IsNullOrWhiteSpace(rule.SshUser) ? rule.SshHost! : $"{rule.SshUser}@{rule.SshHost}";
 
-    private static string QName(string value) => $"Windowx Forward - {value}";
+    private static string QName(string value) => $"Windows Forward - {value}";
 
     private static string Q(string? value) => value ?? string.Empty;
 

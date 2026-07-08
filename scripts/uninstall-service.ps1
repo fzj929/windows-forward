@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$ServiceName = "WindowxForward"
+    [string]$ServiceName = "WindowsForward"
 )
 
 $ErrorActionPreference = "Stop"

@@ -227,7 +227,7 @@ onMounted(refresh)
   <main class="shell">
     <section class="hero">
       <div>
-        <p class="eyebrow">WINDOWX FORWARD</p>
+        <p class="eyebrow">WINDOWS FORWARD</p>
         <h1>Windows 转发规则控制台</h1>
         <p class="subtitle">集中配置 portproxy、防火墙、NAT、路由、IP 转发和 SSH 转发；规则先入库，启用时才执行系统命令。</p>
       </div>

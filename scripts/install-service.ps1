@@ -1,6 +1,6 @@
 ﻿param(
-    [string]$ServiceName = "WindowxForward",
-    [string]$DisplayName = "Windowx Forward Manager",
+    [string]$ServiceName = "WindowsForward",
+    [string]$DisplayName = "Windows Forward Manager",
     [string]$PublishDir = "$PSScriptRoot\..\publish\api"
 )
 

@@ -5,7 +5,7 @@ using WindowForward.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Host.UseWindowsService(options => options.ServiceName = "Windowx Forward Manager");
+builder.Host.UseWindowsService(options => options.ServiceName = "Windows Forward Manager");
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default")));

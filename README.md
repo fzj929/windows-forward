@@ -1,4 +1,4 @@
-# Windowx Forward
+# Windows Forward
 
 Windows 转发规则管理服务，后端使用 C# / ASP.NET Core / EF Core SQLite，前端使用 Vue 3 + Element Plus。
 
@@ -34,7 +34,7 @@ npm.cmd run dev
 ## 构建验证
 
 ```powershell
-dotnet build .\Windowx-Forward.sln
+dotnet build .\Windows-Forward.sln
 cd .\web
 npm.cmd run build
 ```
@@ -60,7 +60,7 @@ http://localhost:5000
 ```powershell
 .\scripts\deploy.ps1 -Port 8088
 .\scripts\deploy.ps1 -SkipNpmInstall
-.\scripts\deploy.ps1 -PublishDir D:\apps\WindowxForward
+.\scripts\deploy.ps1 -PublishDir D:\apps\WindowsForward
 ```
 
 ## 安装为 Windows 服务
