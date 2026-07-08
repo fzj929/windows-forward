@@ -28,6 +28,13 @@ using (var scope = app.Services.CreateScope())
 
 app.UseCors();
 
+var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+if (Directory.Exists(webRoot))
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+}
+
 app.MapGet("/api/rules", async (AppDbContext db) =>
     await db.ForwardRules.OrderByDescending(x => x.UpdatedAt).ToListAsync());
 
@@ -191,5 +198,10 @@ app.MapDelete("/api/rules/{id:int}", async (int id, AppDbContext db) =>
     await db.SaveChangesAsync();
     return Results.Ok(ApiResponse.Ok<object?>(null, "规则已删除。"));
 });
+
+if (Directory.Exists(webRoot))
+{
+    app.MapFallbackToFile("index.html");
+}
 
 app.Run();

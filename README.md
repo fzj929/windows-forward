@@ -39,6 +39,30 @@ cd .\web
 npm.cmd run build
 ```
 
+## 一键部署运行
+
+脚本会自动安装前端依赖、构建 Vue 页面、发布后台、把前端 `dist` 复制到后台 `wwwroot`，并安装或重启 Windows 服务。
+
+请使用管理员 PowerShell 执行：
+
+```powershell
+.\scripts\deploy.ps1
+```
+
+默认访问地址：
+
+```text
+http://localhost:5000
+```
+
+常用参数：
+
+```powershell
+.\scripts\deploy.ps1 -Port 8088
+.\scripts\deploy.ps1 -SkipNpmInstall
+.\scripts\deploy.ps1 -PublishDir D:\apps\WindowxForward
+```
+
 ## 安装为 Windows 服务
 
 转发命令通常需要管理员权限。请在管理员 PowerShell 中执行：
