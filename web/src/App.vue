@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Connection, Delete, Edit, Refresh, SwitchButton, View } from '@element-plus/icons-vue'
+import { Connection, Delete, Edit, Refresh, Search, SwitchButton, View } from '@element-plus/icons-vue'
 import {
   createRule,
   deleteRule,
@@ -48,6 +48,8 @@ const applyingId = ref<number>()
 const preview = ref('')
 const formRef = ref<FormInstance>()
 const editingId = ref<number>()
+const ruleQuery = ref('')
+const ruleStatus = ref<'all' | 'enabled' | 'disabled'>('all')
 
 const form = reactive<ForwardRuleInput>({
   name: '',
@@ -78,6 +80,25 @@ const isPortLike = computed(() => [ForwardRuleType.PortProxy, ForwardRuleType.Fi
 const needsTarget = computed(() => [ForwardRuleType.PortProxy, ForwardRuleType.Nat, ForwardRuleType.SshLocal, ForwardRuleType.SshRemote].includes(form.type))
 const needsSsh = computed(() => [ForwardRuleType.SshLocal, ForwardRuleType.SshRemote, ForwardRuleType.SshDynamic].includes(form.type))
 const needsRoute = computed(() => form.type === ForwardRuleType.Route)
+const enabledCount = computed(() => rules.value.filter(x => x.enabled).length)
+const disabledCount = computed(() => rules.value.length - enabledCount.value)
+const latestLog = computed(() => commandLogs.value[0])
+const failedLogCount = computed(() => commandLogs.value.filter(x => !x.success).length)
+const visibleRules = computed(() => {
+  const keyword = ruleQuery.value.trim().toLowerCase()
+  return rules.value.filter(rule => {
+    const statusMatched =
+      ruleStatus.value === 'all' ||
+      (ruleStatus.value === 'enabled' && rule.enabled) ||
+      (ruleStatus.value === 'disabled' && !rule.enabled)
+    const keywordMatched =
+      !keyword ||
+      rule.name.toLowerCase().includes(keyword) ||
+      describe(rule).toLowerCase().includes(keyword) ||
+      typeName(rule.type).toLowerCase().includes(keyword)
+    return statusMatched && keywordMatched
+  })
+})
 
 function cloneForm(rule: ForwardRule): ForwardRuleInput {
   return {
@@ -155,6 +176,10 @@ async function refresh() {
   } finally {
     loading.value = false
   }
+}
+
+async function refreshDashboard() {
+  await Promise.all([refresh(), refreshLogs(), refreshPortProxy()])
 }
 
 async function refreshLogs() {
@@ -252,22 +277,25 @@ async function remove(rule: ForwardRule) {
   }
 }
 
-onMounted(refresh)
-onMounted(refreshLogs)
-onMounted(refreshPortProxy)
+onMounted(refreshDashboard)
 </script>
 
 <template>
   <main class="shell">
     <section class="hero">
-      <div>
-        <p class="eyebrow">WINDOWS FORWARD</p>
-        <h1>Windows 转发规则控制台</h1>
-        <p class="subtitle">集中配置 portproxy、防火墙、NAT、路由、IP 转发和 SSH 转发；规则先入库，启用时才执行系统命令。</p>
+      <div class="brand-block">
+        <img class="app-logo" src="/windows-forward.svg" alt="Windows Forward" />
+        <div>
+          <p class="eyebrow">WINDOWS FORWARD</p>
+          <h1>转发规则控制台</h1>
+          <p class="subtitle">把 Windows 端口转发、防火墙、NAT、路由和 SSH 隧道放在一个可审计的操作台里。</p>
+        </div>
       </div>
       <div class="status-board">
         <span>规则总数 <b>{{ rules.length }}</b></span>
-        <span>已启用 <b>{{ rules.filter(x => x.enabled).length }}</b></span>
+        <span>已启用 <b>{{ enabledCount }}</b></span>
+        <span>待启用 <b>{{ disabledCount }}</b></span>
+        <span>失败日志 <b>{{ failedLogCount }}</b></span>
       </div>
     </section>
 
@@ -370,16 +398,29 @@ onMounted(refreshPortProxy)
 
       <el-card class="rules" shadow="never">
         <template #header>
-          <div class="card-head">
-            <div>
-              <strong>规则列表</strong>
-              <p>启用会执行对应 Windows 命令，禁用会删除或关闭对应配置。</p>
+          <div class="stack-head">
+            <div class="card-head">
+              <div>
+                <strong>规则列表</strong>
+                <p>启用会执行对应 Windows 命令，禁用会删除或关闭对应配置。</p>
+              </div>
+              <el-button :icon="Refresh" @click="refreshDashboard">刷新全部</el-button>
             </div>
-            <el-button :icon="Refresh" @click="refresh">刷新</el-button>
+            <div class="rule-toolbar">
+              <el-input v-model="ruleQuery" :prefix-icon="Search" clearable placeholder="搜索规则名称、类型或地址" />
+              <el-segmented
+                v-model="ruleStatus"
+                :options="[
+                  { label: '全部', value: 'all' },
+                  { label: '启用', value: 'enabled' },
+                  { label: '禁用', value: 'disabled' }
+                ]"
+              />
+            </div>
           </div>
         </template>
 
-        <el-table v-loading="loading" :data="rules" row-key="id" empty-text="暂无规则，请先创建。">
+        <el-table v-loading="loading" :data="visibleRules" row-key="id" empty-text="暂无匹配规则。">
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
               <el-tag :type="row.enabled ? 'success' : 'info'" effect="dark">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
@@ -413,69 +454,78 @@ onMounted(refreshPortProxy)
       </el-card>
     </section>
 
-    <el-card class="portproxy-panel" shadow="never">
-      <template #header>
-        <div class="card-head">
-          <div>
-            <strong>系统 portproxy 配置</strong>
-            <p>执行 <code>netsh interface portproxy show all</code>，查看 Windows 当前真实生效的端口转发规则。</p>
-          </div>
-          <el-button :icon="Refresh" :loading="portProxyLoading" @click="refreshPortProxy">刷新配置</el-button>
-        </div>
-      </template>
-
-      <div class="portproxy-status">
-        <el-tag :type="portProxyResult?.success ? 'success' : 'info'" effect="dark">
-          {{ portProxyResult ? `返回码 ${portProxyResult.exitCode ?? '-'}` : '未执行' }}
-        </el-tag>
-        <span>{{ portProxyResult?.message ?? '点击刷新配置读取系统 portproxy。' }}</span>
-      </div>
-      <pre class="command-code">{{ portProxyResult?.output?.trim() || '当前没有读取到 portproxy 规则。' }}</pre>
-    </el-card>
-
-    <el-card class="log-panel" shadow="never">
-      <template #header>
-        <div class="card-head">
-          <div>
-            <strong>最近执行命令</strong>
-            <p>记录启用、禁用规则时实际执行的 Windows 命令、返回码和输出。</p>
-          </div>
-          <el-button :icon="Refresh" @click="refreshLogs">刷新日志</el-button>
-        </div>
-      </template>
-
-      <el-table v-loading="logsLoading" :data="commandLogs" row-key="id" empty-text="暂无命令执行记录。">
-        <el-table-column type="expand">
-          <template #default="{ row }">
-            <div class="log-detail">
-              <div class="detail-label">命令</div>
-              <pre class="command-code">{{ row.commandText }}</pre>
-              <div class="detail-label">输出</div>
-              <pre class="log-output">{{ row.output || '无输出。' }}</pre>
+    <section class="operations-grid">
+      <el-card class="portproxy-panel" shadow="never">
+        <template #header>
+          <div class="card-head">
+            <div>
+              <strong>系统 portproxy 配置</strong>
+              <p>执行 <code>netsh interface portproxy show all</code>，查看 Windows 当前真实生效的端口转发规则。</p>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="结果" width="92">
-          <template #default="{ row }">
-            <el-tag :type="row.success ? 'success' : 'danger'" effect="dark">
-              {{ row.success ? '成功' : '失败' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="规则 / 动作" min-width="220">
-          <template #default="{ row }">
-            <div class="rule-name">{{ row.ruleName || '未关联规则' }}</div>
-            <div class="rule-meta">{{ row.action }} · {{ row.message }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="返回码" width="100">
-          <template #default="{ row }">{{ row.exitCode ?? '-' }}</template>
-        </el-table-column>
-        <el-table-column label="执行时间" width="190">
-          <template #default="{ row }">{{ new Date(row.executedAt).toLocaleString() }}</template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+            <el-button :icon="Refresh" :loading="portProxyLoading" @click="refreshPortProxy">刷新配置</el-button>
+          </div>
+        </template>
+
+        <div class="portproxy-status">
+          <el-tag :type="portProxyResult?.success ? 'success' : 'info'" effect="dark">
+            {{ portProxyResult ? `返回码 ${portProxyResult.exitCode ?? '-'}` : '未执行' }}
+          </el-tag>
+          <span>{{ portProxyResult?.message ?? '点击刷新配置读取系统 portproxy。' }}</span>
+        </div>
+        <pre class="command-code state-output">{{ portProxyResult?.output?.trim() || '当前没有读取到 portproxy 规则。' }}</pre>
+      </el-card>
+
+      <el-card class="log-panel" shadow="never">
+        <template #header>
+          <div class="card-head">
+            <div>
+              <strong>最近执行命令</strong>
+              <p>记录实际执行的 Windows 命令、返回码和输出。</p>
+            </div>
+            <el-button :icon="Refresh" @click="refreshLogs">刷新日志</el-button>
+          </div>
+        </template>
+
+        <div v-if="latestLog" class="latest-log">
+          <el-tag :type="latestLog.success ? 'success' : 'danger'" effect="dark">
+            最近{{ latestLog.success ? '成功' : '失败' }}
+          </el-tag>
+          <span>{{ latestLog.ruleName }} · {{ latestLog.action }} · {{ new Date(latestLog.executedAt).toLocaleString() }}</span>
+        </div>
+
+        <el-table v-loading="logsLoading" :data="commandLogs" row-key="id" empty-text="暂无命令执行记录。">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <div class="log-detail">
+                <div class="detail-label">命令</div>
+                <pre class="command-code">{{ row.commandText }}</pre>
+                <div class="detail-label">输出</div>
+                <pre class="log-output">{{ row.output || '无输出。' }}</pre>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="结果" width="92">
+            <template #default="{ row }">
+              <el-tag :type="row.success ? 'success' : 'danger'" effect="dark">
+                {{ row.success ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="规则 / 动作" min-width="220">
+            <template #default="{ row }">
+              <div class="rule-name">{{ row.ruleName || '未关联规则' }}</div>
+              <div class="rule-meta">{{ row.action }} · {{ row.message }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="返回码" width="90">
+            <template #default="{ row }">{{ row.exitCode ?? '-' }}</template>
+          </el-table-column>
+          <el-table-column label="执行时间" width="180">
+            <template #default="{ row }">{{ new Date(row.executedAt).toLocaleString() }}</template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+    </section>
   </main>
 </template>
 
@@ -488,10 +538,23 @@ onMounted(refreshPortProxy)
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr) minmax(440px, auto);
+  align-items: center;
   gap: 28px;
   padding: 22px 0 28px;
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.app-logo {
+  width: 74px;
+  height: 74px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 18px 26px rgba(19, 35, 30, 0.18));
 }
 
 .eyebrow {
@@ -519,7 +582,7 @@ h1 {
 
 .status-board {
   display: grid;
-  grid-template-columns: repeat(2, 120px);
+  grid-template-columns: repeat(4, 112px);
   border: 1px solid var(--line);
   background: rgba(255, 255, 250, 0.68);
   box-shadow: 0 18px 42px rgba(23, 33, 29, 0.08);
@@ -542,11 +605,31 @@ h1 {
   font-size: 30px;
 }
 
+.stack-head {
+  display: grid;
+  gap: 14px;
+}
+
+.rule-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
 .workspace {
   display: grid;
-  grid-template-columns: minmax(380px, 0.88fr) minmax(620px, 1.3fr);
+  grid-template-columns: minmax(390px, 0.82fr) minmax(680px, 1.38fr);
   gap: 18px;
   align-items: start;
+}
+
+.operations-grid {
+  display: grid;
+  grid-template-columns: minmax(390px, 0.82fr) minmax(680px, 1.38fr);
+  gap: 18px;
+  align-items: start;
+  margin-top: 18px;
 }
 
 .editor,
@@ -559,14 +642,22 @@ h1 {
 }
 
 .log-panel {
-  margin-top: 18px;
+  min-width: 0;
 }
 
 .portproxy-panel {
-  margin-top: 18px;
+  min-width: 0;
 }
 
 .portproxy-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.latest-log {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -646,6 +737,12 @@ h1 {
   line-height: 1.55;
 }
 
+.state-output {
+  min-height: 168px;
+  max-height: 300px;
+  overflow: auto;
+}
+
 .log-output {
   max-height: 240px;
   overflow: auto;
@@ -664,6 +761,7 @@ h1 {
 
 @media (max-width: 1120px) {
   .workspace,
+  .operations-grid,
   .hero {
     grid-template-columns: 1fr;
   }
@@ -680,13 +778,23 @@ h1 {
   }
 
   .form-grid,
-  .form-grid.three {
+  .form-grid.three,
+  .rule-toolbar {
     grid-template-columns: 1fr;
   }
 
   .status-board {
     grid-template-columns: 1fr 1fr;
     width: 100%;
+  }
+
+  .brand-block {
+    align-items: flex-start;
+  }
+
+  .app-logo {
+    width: 52px;
+    height: 52px;
   }
 }
 </style>
