@@ -9,9 +9,11 @@ import {
   enableRule,
   ForwardProtocol,
   ForwardRuleType,
+  listCommandLogs,
   listRules,
   updateRule,
   validateRule,
+  type CommandExecutionLog,
   type FieldError,
   type ForwardRule,
   type ForwardRuleInput
@@ -34,7 +36,9 @@ const protocolOptions = [
 ]
 
 const rules = ref<ForwardRule[]>([])
+const commandLogs = ref<CommandExecutionLog[]>([])
 const loading = ref(false)
+const logsLoading = ref(false)
 const saving = ref(false)
 const applyingId = ref<number>()
 const preview = ref('')
@@ -149,6 +153,15 @@ async function refresh() {
   }
 }
 
+async function refreshLogs() {
+  logsLoading.value = true
+  try {
+    commandLogs.value = await listCommandLogs(30)
+  } finally {
+    logsLoading.value = false
+  }
+}
+
 async function previewCommand() {
   try {
     const result = await validateRule({ ...form })
@@ -198,6 +211,7 @@ async function toggle(rule: ForwardRule) {
     const result = rule.enabled ? await disableRule(rule.id) : await enableRule(rule.id)
     ElMessage.success(result.message)
     await refresh()
+    await refreshLogs()
   } catch (error) {
     surfaceError(error)
   } finally {
@@ -221,6 +235,7 @@ async function remove(rule: ForwardRule) {
 }
 
 onMounted(refresh)
+onMounted(refreshLogs)
 </script>
 
 <template>
@@ -378,6 +393,50 @@ onMounted(refresh)
         </el-table>
       </el-card>
     </section>
+
+    <el-card class="log-panel" shadow="never">
+      <template #header>
+        <div class="card-head">
+          <div>
+            <strong>最近执行命令</strong>
+            <p>记录启用、禁用规则时实际执行的 Windows 命令、返回码和输出。</p>
+          </div>
+          <el-button :icon="Refresh" @click="refreshLogs">刷新日志</el-button>
+        </div>
+      </template>
+
+      <el-table v-loading="logsLoading" :data="commandLogs" row-key="id" empty-text="暂无命令执行记录。">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="log-detail">
+              <div class="detail-label">命令</div>
+              <pre class="command-code">{{ row.commandText }}</pre>
+              <div class="detail-label">输出</div>
+              <pre class="log-output">{{ row.output || '无输出。' }}</pre>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="结果" width="92">
+          <template #default="{ row }">
+            <el-tag :type="row.success ? 'success' : 'danger'" effect="dark">
+              {{ row.success ? '成功' : '失败' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="规则 / 动作" min-width="220">
+          <template #default="{ row }">
+            <div class="rule-name">{{ row.ruleName || '未关联规则' }}</div>
+            <div class="rule-meta">{{ row.action }} · {{ row.message }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="返回码" width="100">
+          <template #default="{ row }">{{ row.exitCode ?? '-' }}</template>
+        </el-table-column>
+        <el-table-column label="执行时间" width="190">
+          <template #default="{ row }">{{ new Date(row.executedAt).toLocaleString() }}</template>
+        </el-table-column>
+      </el-table>
+    </el-card>
   </main>
 </template>
 
@@ -452,10 +511,15 @@ h1 {
 }
 
 .editor,
-.rules {
+.rules,
+.log-panel {
   border: 1px solid var(--line);
   background: var(--panel);
   backdrop-filter: blur(14px);
+}
+
+.log-panel {
+  margin-top: 18px;
 }
 
 .card-head {
@@ -505,6 +569,34 @@ h1 {
   background: #14211d;
   border-radius: 8px;
   line-height: 1.6;
+}
+
+.log-detail {
+  padding: 8px 12px 16px 48px;
+}
+
+.detail-label {
+  margin: 10px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.command-code,
+.log-output {
+  margin: 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #f4f2e8;
+  background: #14211d;
+  border-radius: 8px;
+  line-height: 1.55;
+}
+
+.log-output {
+  max-height: 240px;
+  overflow: auto;
 }
 
 .rule-name {

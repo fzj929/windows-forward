@@ -1,16 +1,19 @@
 using System.Diagnostics;
+using WindowForward.Api.Data;
 using WindowForward.Api.Models;
 
 namespace WindowForward.Api.Services;
 
-public sealed class ForwardCommandService
+public sealed class ForwardCommandService(AppDbContext db)
 {
     public static string BuildPreview(ForwardRuleInput rule) => string.Join(Environment.NewLine, BuildCommands(rule, true));
 
     public async Task<CommandResult> EnableAsync(ForwardRule rule)
     {
         var input = FromEntity(rule);
-        return await RunPowerShellAsync(BuildCommands(input, true));
+        var result = await RunPowerShellAsync(BuildCommands(input, true));
+        await LogAsync(rule, "启用", result);
+        return result;
     }
 
     public async Task<CommandResult> DisableAsync(ForwardRule rule)
@@ -18,11 +21,15 @@ public sealed class ForwardCommandService
         if (rule.Type is ForwardRuleType.SshLocal or ForwardRuleType.SshRemote or ForwardRuleType.SshDynamic &&
             rule.RuntimeProcessId is not null)
         {
-            return await RunPowerShellAsync(new[] { $"Stop-Process -Id {rule.RuntimeProcessId} -Force -ErrorAction Stop" });
+            var sshResult = await RunPowerShellAsync(new[] { $"Stop-Process -Id {rule.RuntimeProcessId} -Force -ErrorAction Stop" });
+            await LogAsync(rule, "禁用", sshResult);
+            return sshResult;
         }
 
         var input = FromEntity(rule);
-        return await RunPowerShellAsync(BuildCommands(input, false));
+        var result = await RunPowerShellAsync(BuildCommands(input, false));
+        await LogAsync(rule, "禁用", result);
+        return result;
     }
 
     private static IEnumerable<string> BuildCommands(ForwardRuleInput rule, bool enable)
@@ -114,10 +121,11 @@ public sealed class ForwardCommandService
 
     private static async Task<CommandResult> RunPowerShellAsync(IEnumerable<string> commands)
     {
-        var script = string.Join("; ", commands.Where(x => !x.TrimStart().StartsWith('#')));
+        var commandList = commands.ToList();
+        var script = string.Join("; ", commandList.Where(x => !x.TrimStart().StartsWith('#')));
         if (string.IsNullOrWhiteSpace(script))
         {
-            return new(true, "无需执行系统命令。", string.Empty, null);
+            return new(true, "无需执行系统命令。", string.Empty, null, null, string.Join(Environment.NewLine, commandList));
         }
 
         var startInfo = new ProcessStartInfo
@@ -133,7 +141,7 @@ public sealed class ForwardCommandService
         using var process = Process.Start(startInfo);
         if (process is null)
         {
-            return new(false, "无法启动 PowerShell。", string.Empty, null);
+            return new(false, "无法启动 PowerShell。", string.Empty, null, null, script);
         }
 
         var output = await process.StandardOutput.ReadToEndAsync();
@@ -143,8 +151,25 @@ public sealed class ForwardCommandService
 
         var processId = int.TryParse(output.Trim(), out var pid) ? pid : (int?)null;
         return process.ExitCode == 0
-            ? new(true, "系统命令执行成功。", combined, processId)
-            : new(false, "系统命令执行失败，请确认服务以管理员权限运行。", combined, null);
+            ? new(true, "系统命令执行成功。", combined, processId, process.ExitCode, script)
+            : new(false, "系统命令执行失败，请确认服务以管理员权限运行。", combined, null, process.ExitCode, script);
+    }
+
+    private async Task LogAsync(ForwardRule rule, string action, CommandResult result)
+    {
+        db.CommandExecutionLogs.Add(new CommandExecutionLog
+        {
+            ForwardRuleId = rule.Id,
+            RuleName = rule.Name,
+            Action = action,
+            CommandText = result.CommandText,
+            Success = result.Success,
+            ExitCode = result.ExitCode,
+            Message = result.Message,
+            Output = result.Output,
+            ExecutedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
     }
 
     private static string SshTarget(ForwardRuleInput rule) =>
@@ -157,4 +182,10 @@ public sealed class ForwardCommandService
     private static string Ps(string? value) => $"'{(value ?? string.Empty).Replace("'", "''")}'";
 }
 
-public sealed record CommandResult(bool Success, string Message, string Output, int? ProcessId);
+public sealed record CommandResult(
+    bool Success,
+    string Message,
+    string Output,
+    int? ProcessId,
+    int? ExitCode,
+    string CommandText);

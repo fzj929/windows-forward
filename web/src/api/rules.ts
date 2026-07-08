@@ -54,6 +54,19 @@ export interface FieldError {
   message: string
 }
 
+export interface CommandExecutionLog {
+  id: number
+  forwardRuleId?: number
+  ruleName?: string
+  action: string
+  commandText: string
+  success: boolean
+  exitCode?: number
+  message: string
+  output?: string
+  executedAt: string
+}
+
 export async function listRules() {
   const { data } = await axios.get<ForwardRule[]>('/api/rules')
   return data
@@ -86,5 +99,12 @@ export async function disableRule(id: number) {
 
 export async function validateRule(input: ForwardRuleInput) {
   const { data } = await axios.post<ApiResponse<string>>('/api/rules/validate', input)
+  return data
+}
+
+export async function listCommandLogs(take = 30) {
+  const { data } = await axios.get<CommandExecutionLog[]>('/api/command-logs', {
+    params: { take }
+  })
   return data
 }

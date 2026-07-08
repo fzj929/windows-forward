@@ -38,6 +38,20 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
+    db.Database.ExecuteSqlRaw("""
+        CREATE TABLE IF NOT EXISTS "CommandExecutionLogs" (
+            "Id" INTEGER NOT NULL CONSTRAINT "PK_CommandExecutionLogs" PRIMARY KEY AUTOINCREMENT,
+            "ForwardRuleId" INTEGER NULL,
+            "RuleName" TEXT NULL,
+            "Action" TEXT NOT NULL,
+            "CommandText" TEXT NOT NULL,
+            "Success" INTEGER NOT NULL,
+            "ExitCode" INTEGER NULL,
+            "Message" TEXT NOT NULL,
+            "Output" TEXT NULL,
+            "ExecutedAt" TEXT NOT NULL
+        );
+        """);
 }
 
 app.UseCors();
@@ -63,6 +77,17 @@ app.MapGet("/api/rules/{id:int}", async (int id, AppDbContext db) =>
 {
     var rule = await db.ForwardRules.FindAsync(id);
     return rule is null ? Results.NotFound(ApiResponse.Fail("规则不存在。")) : Results.Ok(rule);
+});
+
+app.MapGet("/api/command-logs", async (int? take, AppDbContext db) =>
+{
+    var count = Math.Clamp(take ?? 30, 1, 200);
+    var logs = await db.CommandExecutionLogs.AsNoTracking().ToListAsync();
+    return logs
+        .OrderByDescending(x => x.ExecutedAt)
+        .ThenByDescending(x => x.Id)
+        .Take(count)
+        .ToList();
 });
 
 app.MapPost("/api/rules/validate", (ForwardRuleInput input, ForwardRuleValidator validator) =>
