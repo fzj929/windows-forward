@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using WindowForward.Api.Data;
 using WindowForward.Api.Models;
@@ -8,6 +9,11 @@ namespace WindowForward.Api.Services;
 
 public sealed partial class ForwardCommandService(AppDbContext db)
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     public static string BuildPreview(ForwardRuleInput rule) => string.Join(Environment.NewLine, BuildCommands(rule, true));
 
     public async Task<CommandResult> EnableAsync(ForwardRule rule)
@@ -52,6 +58,51 @@ public sealed partial class ForwardCommandService(AppDbContext db)
         return ParsePortProxyRules(result.Output);
     }
 
+    public async Task<IReadOnlyList<SystemFirewallRule>> GetFirewallRulesAsync()
+    {
+        const string script = """
+            $items = Get-NetFirewallRule -Direction Inbound -Action Allow -ErrorAction SilentlyContinue | ForEach-Object {
+                $rule = $_
+                $rule | Get-NetFirewallPortFilter -ErrorAction SilentlyContinue | ForEach-Object {
+                    [pscustomobject]@{
+                        DisplayName = $rule.DisplayName
+                        Enabled = $rule.Enabled.ToString()
+                        Direction = $rule.Direction.ToString()
+                        Action = $rule.Action.ToString()
+                        Protocol = $_.Protocol.ToString()
+                        LocalPort = $_.LocalPort.ToString()
+                    }
+                }
+            }
+            @($items) | ConvertTo-Json -Depth 4
+            """;
+        var result = await RunPowerShellAsync(new[] { script });
+        return result.Success ? DeserializeJsonArray<SystemFirewallRule>(result.Output) : Array.Empty<SystemFirewallRule>();
+    }
+
+    public async Task<IReadOnlyList<SystemNatStaticMapping>> GetNatStaticMappingsAsync()
+    {
+        const string script = """
+            @(Get-NetNatStaticMapping -ErrorAction SilentlyContinue |
+                Select-Object NatName, Protocol, ExternalIPAddress, ExternalPort, InternalIPAddress, InternalPort) |
+                ConvertTo-Json -Depth 4
+            """;
+        var result = await RunPowerShellAsync(new[] { script });
+        return result.Success ? DeserializeJsonArray<SystemNatStaticMapping>(result.Output) : Array.Empty<SystemNatStaticMapping>();
+    }
+
+    public async Task<IReadOnlyList<SystemRouteRule>> GetRouteRulesAsync()
+    {
+        const string script = """
+            @(Get-NetRoute -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } |
+                Select-Object DestinationPrefix, NextHop, RouteMetric, InterfaceAlias, PolicyStore) |
+                ConvertTo-Json -Depth 4
+            """;
+        var result = await RunPowerShellAsync(new[] { script });
+        return result.Success ? DeserializeJsonArray<SystemRouteRule>(result.Output) : Array.Empty<SystemRouteRule>();
+    }
+
     private static IReadOnlyList<SystemPortProxyRule> ParsePortProxyRules(string output)
     {
         var rules = new List<SystemPortProxyRule>();
@@ -92,7 +143,8 @@ public sealed partial class ForwardCommandService(AppDbContext db)
             },
             ForwardRuleType.Firewall => new[]
             {
-                $"Get-NetFirewallRule -DisplayName {Ps(QName(rule.Name))} -ErrorAction SilentlyContinue | Remove-NetFirewallRule"
+                $"Get-NetFirewallRule -DisplayName {Ps(QName(rule.Name))} -ErrorAction SilentlyContinue | Remove-NetFirewallRule",
+                $"Get-NetFirewallRule -DisplayName {Ps(rule.Name)} -ErrorAction SilentlyContinue | Remove-NetFirewallRule"
             },
             ForwardRuleType.Nat when enable => new[]
             {
@@ -159,6 +211,24 @@ public sealed partial class ForwardCommandService(AppDbContext db)
         SshHost = rule.SshHost,
         SshUser = rule.SshUser
     };
+
+    private static IReadOnlyList<T> DeserializeJsonArray<T>(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return Array.Empty<T>();
+        }
+
+        using var doc = JsonDocument.Parse(output);
+        return doc.RootElement.ValueKind switch
+        {
+            JsonValueKind.Array => JsonSerializer.Deserialize<List<T>>(doc.RootElement.GetRawText(), JsonOptions) ?? [],
+            JsonValueKind.Object => JsonSerializer.Deserialize<T>(doc.RootElement.GetRawText(), JsonOptions) is { } item
+                ? [item]
+                : [],
+            _ => []
+        };
+    }
 
     private static async Task<CommandResult> RunPowerShellAsync(IEnumerable<string> commands)
     {

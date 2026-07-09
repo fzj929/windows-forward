@@ -11,13 +11,19 @@ import {
   ForwardRuleType,
   listCommandLogs,
   listRules,
+  listSystemFirewallRules,
+  listSystemNatMappings,
   listSystemPortProxyRules,
+  listSystemRoutes,
   updateRule,
   validateRule,
   type CommandExecutionLog,
   type FieldError,
   type ForwardRule,
   type ForwardRuleInput,
+  type SystemFirewallRule,
+  type SystemNatStaticMapping,
+  type SystemRouteRule,
   type SystemPortProxyRule
 } from './api/rules'
 
@@ -34,6 +40,9 @@ interface DisplayRuleRow {
   updatedAt?: string
   rule?: ForwardRule
   systemRule?: SystemPortProxyRule
+  systemFirewallRule?: SystemFirewallRule
+  systemNatMapping?: SystemNatStaticMapping
+  systemRouteRule?: SystemRouteRule
 }
 
 const typeOptions = [
@@ -55,6 +64,9 @@ const protocolOptions = [
 const selectedMenu = ref<MenuKey>(ForwardRuleType.PortProxy)
 const rules = ref<ForwardRule[]>([])
 const systemPortProxyRules = ref<SystemPortProxyRule[]>([])
+const systemFirewallRules = ref<SystemFirewallRule[]>([])
+const systemNatMappings = ref<SystemNatStaticMapping[]>([])
+const systemRouteRules = ref<SystemRouteRule[]>([])
 const commandLogs = ref<CommandExecutionLog[]>([])
 const loading = ref(false)
 const systemLoading = ref(false)
@@ -127,22 +139,8 @@ const displayRows = computed<DisplayRuleRow[]>(() => {
       rule
     }))
 
-  if (selectedType.value !== ForwardRuleType.PortProxy) {
-    return databaseRows
-  }
-
-  const databaseKeys = new Set(databaseRows.map(row => portProxyKeyFromInput(row.rule!)))
-  const systemOnlyRows = systemPortProxyRules.value
-    .filter(rule => !databaseKeys.has(portProxyKeyFromSystem(rule)))
-    .map(rule => ({
-      key: `sys-${portProxyKeyFromSystem(rule)}`,
-      source: 'system' as const,
-      name: `系统规则 ${rule.listenPort}`,
-      type: ForwardRuleType.PortProxy,
-      detail: `${rule.listenAddress}:${rule.listenPort} -> ${rule.connectAddress}:${rule.connectPort}`,
-      actualEnabled: true,
-      systemRule: rule
-    }))
+  const databaseKeys = new Set(databaseRows.map(row => systemKeyFromInput(row.rule!)).filter(Boolean))
+  const systemOnlyRows = systemRowsForType(selectedType.value, databaseKeys)
 
   return [...databaseRows, ...systemOnlyRows]
 })
@@ -178,6 +176,10 @@ function typeName(type: ForwardRuleType) {
 
 function protocolName(protocol: ForwardProtocol) {
   return protocol === ForwardProtocol.Udp ? 'UDP' : 'TCP'
+}
+
+function protocolFromName(protocol: string) {
+  return protocol.toUpperCase() === 'UDP' ? ForwardProtocol.Udp : ForwardProtocol.Tcp
 }
 
 function describe(rule: ForwardRule) {
@@ -231,6 +233,26 @@ function resetForm() {
   formRef.value?.clearValidate()
 }
 
+function routePrefixFromInput(rule: Pick<ForwardRule, 'routeDestination' | 'routeMask'>) {
+  const prefixLength = maskToPrefixLength(rule.routeMask)
+  return rule.routeDestination && prefixLength !== undefined ? `${rule.routeDestination}/${prefixLength}` : ''
+}
+
+function maskToPrefixLength(mask?: string) {
+  if (!mask) return undefined
+  const octets = mask.split('.').map(Number)
+  if (octets.length !== 4 || octets.some(x => !Number.isInteger(x) || x < 0 || x > 255)) return undefined
+  const binary = octets.map(x => x.toString(2).padStart(8, '0')).join('')
+  if (!/^1*0*$/.test(binary)) return undefined
+  return binary.indexOf('0') === -1 ? 32 : binary.indexOf('0')
+}
+
+function cidrToMask(prefixLength: number) {
+  const length = Number.isInteger(prefixLength) && prefixLength >= 0 && prefixLength <= 32 ? prefixLength : 24
+  const bits = '1'.repeat(length).padEnd(32, '0')
+  return bits.match(/.{8}/g)!.map(x => Number.parseInt(x, 2)).join('.')
+}
+
 function portProxyKeyFromInput(rule: Pick<ForwardRule, 'listenAddress' | 'listenPort' | 'connectAddress' | 'connectPort'>) {
   return `${rule.listenAddress ?? '0.0.0.0'}:${rule.listenPort}->${rule.connectAddress}:${rule.connectPort}`.toLowerCase()
 }
@@ -239,23 +261,169 @@ function portProxyKeyFromSystem(rule: SystemPortProxyRule) {
   return `${rule.listenAddress}:${rule.listenPort}->${rule.connectAddress}:${rule.connectPort}`.toLowerCase()
 }
 
-function isSystemEnabled(rule: ForwardRule) {
-  if (rule.type !== ForwardRuleType.PortProxy) return rule.enabled
-  const key = portProxyKeyFromInput(rule)
-  return systemPortProxyRules.value.some(systemRule => portProxyKeyFromSystem(systemRule) === key)
+function firewallKeyFromInput(rule: Pick<ForwardRule, 'protocol' | 'listenPort'>) {
+  return `firewall:${protocolName(rule.protocol)}:${rule.listenPort}`.toLowerCase()
 }
 
-function inputFromSystemRule(rule: SystemPortProxyRule): ForwardRuleInput {
-  return {
-    name: `系统导入 ${rule.listenPort}`,
-    description: '从操作系统 portproxy 配置导入。',
-    type: ForwardRuleType.PortProxy,
-    protocol: ForwardProtocol.Tcp,
-    listenAddress: rule.listenAddress,
-    listenPort: rule.listenPort,
-    connectAddress: rule.connectAddress,
-    connectPort: rule.connectPort
+function firewallKeyFromSystem(rule: SystemFirewallRule) {
+  const port = Number(rule.localPort)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return ''
+  return `firewall:${rule.protocol}:${port}`.toLowerCase()
+}
+
+function natKeyFromInput(rule: Pick<ForwardRule, 'natName' | 'protocol' | 'listenPort' | 'connectAddress' | 'connectPort'>) {
+  return `nat:${rule.natName}:${protocolName(rule.protocol)}:${rule.listenPort}->${rule.connectAddress}:${rule.connectPort}`.toLowerCase()
+}
+
+function natKeyFromSystem(rule: SystemNatStaticMapping) {
+  return `nat:${rule.natName}:${rule.protocol}:${rule.externalPort}->${rule.internalIPAddress}:${rule.internalPort}`.toLowerCase()
+}
+
+function routeKeyFromInput(rule: Pick<ForwardRule, 'routeDestination' | 'routeMask' | 'routeGateway'>) {
+  const prefix = routePrefixFromInput(rule)
+  if (!prefix || !rule.routeGateway) return ''
+  return `route:${prefix}->${rule.routeGateway}`.toLowerCase()
+}
+
+function routeKeyFromSystem(rule: SystemRouteRule) {
+  return `route:${rule.destinationPrefix}->${rule.nextHop}`.toLowerCase()
+}
+
+function systemKeyFromInput(rule: ForwardRule) {
+  if (rule.type === ForwardRuleType.PortProxy) return portProxyKeyFromInput(rule)
+  if (rule.type === ForwardRuleType.Firewall) return firewallKeyFromInput(rule)
+  if (rule.type === ForwardRuleType.Nat) return natKeyFromInput(rule)
+  if (rule.type === ForwardRuleType.Route) return routeKeyFromInput(rule)
+  return ''
+}
+
+function systemRowsForType(type: ForwardRuleType, databaseKeys: Set<string>): DisplayRuleRow[] {
+  if (type === ForwardRuleType.PortProxy) {
+    return systemPortProxyRules.value
+      .filter(rule => !databaseKeys.has(portProxyKeyFromSystem(rule)))
+      .map(rule => ({
+        key: `sys-${portProxyKeyFromSystem(rule)}`,
+        source: 'system' as const,
+        name: `系统规则 ${rule.listenPort}`,
+        type: ForwardRuleType.PortProxy,
+        detail: `${rule.listenAddress}:${rule.listenPort} -> ${rule.connectAddress}:${rule.connectPort}`,
+        actualEnabled: true,
+        systemRule: rule
+      }))
   }
+
+  if (type === ForwardRuleType.Firewall) {
+    return systemFirewallRules.value
+      .filter(rule => firewallKeyFromSystem(rule) && !databaseKeys.has(firewallKeyFromSystem(rule)))
+      .map(rule => ({
+        key: `sys-${firewallKeyFromSystem(rule)}-${rule.displayName}`,
+        source: 'system' as const,
+        name: rule.displayName,
+        type: ForwardRuleType.Firewall,
+        detail: `${rule.protocol} :${rule.localPort} / ${rule.enabled === 'True' ? '系统已启用' : '系统已禁用'}`,
+        actualEnabled: rule.enabled === 'True',
+        systemFirewallRule: rule
+      }))
+  }
+
+  if (type === ForwardRuleType.Nat) {
+    return systemNatMappings.value
+      .filter(rule => !databaseKeys.has(natKeyFromSystem(rule)))
+      .map(rule => ({
+        key: `sys-${natKeyFromSystem(rule)}`,
+        source: 'system' as const,
+        name: `${rule.natName} ${rule.externalPort}`,
+        type: ForwardRuleType.Nat,
+        detail: `${rule.protocol} ${rule.externalIPAddress}:${rule.externalPort} -> ${rule.internalIPAddress}:${rule.internalPort}`,
+        actualEnabled: true,
+        systemNatMapping: rule
+      }))
+  }
+
+  if (type === ForwardRuleType.Route) {
+    return systemRouteRules.value
+      .filter(rule => !databaseKeys.has(routeKeyFromSystem(rule)))
+      .map(rule => ({
+        key: `sys-${routeKeyFromSystem(rule)}-${rule.interfaceAlias}-${rule.routeMetric}`,
+        source: 'system' as const,
+        name: `${rule.destinationPrefix} -> ${rule.nextHop}`,
+        type: ForwardRuleType.Route,
+        detail: `${rule.destinationPrefix} -> ${rule.nextHop} / ${rule.interfaceAlias || '-'} / metric ${rule.routeMetric}`,
+        actualEnabled: true,
+        systemRouteRule: rule
+      }))
+  }
+
+  return []
+}
+
+function isSystemEnabled(rule: ForwardRule) {
+  if (rule.type === ForwardRuleType.PortProxy) {
+    const key = portProxyKeyFromInput(rule)
+    return systemPortProxyRules.value.some(systemRule => portProxyKeyFromSystem(systemRule) === key)
+  }
+  if (rule.type === ForwardRuleType.Firewall) {
+    const key = firewallKeyFromInput(rule)
+    return systemFirewallRules.value.some(systemRule => systemRule.enabled === 'True' && firewallKeyFromSystem(systemRule) === key)
+  }
+  if (rule.type === ForwardRuleType.Nat) {
+    const key = natKeyFromInput(rule)
+    return systemNatMappings.value.some(systemRule => natKeyFromSystem(systemRule) === key)
+  }
+  if (rule.type === ForwardRuleType.Route) {
+    const key = routeKeyFromInput(rule)
+    return systemRouteRules.value.some(systemRule => routeKeyFromSystem(systemRule) === key)
+  }
+  return rule.enabled
+}
+
+function inputFromSystemRow(row: DisplayRuleRow): ForwardRuleInput | undefined {
+  if (row.systemRule) {
+    return {
+      name: `系统导入 ${row.systemRule.listenPort}`,
+      description: '从操作系统 portproxy 配置导入。',
+      type: ForwardRuleType.PortProxy,
+      protocol: ForwardProtocol.Tcp,
+      listenAddress: row.systemRule.listenAddress,
+      listenPort: row.systemRule.listenPort,
+      connectAddress: row.systemRule.connectAddress,
+      connectPort: row.systemRule.connectPort
+    }
+  }
+  if (row.systemFirewallRule) {
+    return {
+      name: row.systemFirewallRule.displayName.replace(/^Windows Forward - /, ''),
+      description: '从操作系统防火墙放行规则导入。',
+      type: ForwardRuleType.Firewall,
+      protocol: protocolFromName(row.systemFirewallRule.protocol),
+      listenPort: Number(row.systemFirewallRule.localPort)
+    }
+  }
+  if (row.systemNatMapping) {
+    return {
+      name: `${row.systemNatMapping.natName} ${row.systemNatMapping.externalPort}`,
+      description: '从操作系统 NAT 静态映射导入。',
+      type: ForwardRuleType.Nat,
+      protocol: protocolFromName(row.systemNatMapping.protocol),
+      listenPort: row.systemNatMapping.externalPort,
+      connectAddress: row.systemNatMapping.internalIPAddress,
+      connectPort: row.systemNatMapping.internalPort,
+      natName: row.systemNatMapping.natName
+    }
+  }
+  if (row.systemRouteRule) {
+    const [destination, prefixLength] = row.systemRouteRule.destinationPrefix.split('/')
+    return {
+      name: `${row.systemRouteRule.destinationPrefix} -> ${row.systemRouteRule.nextHop}`,
+      description: '从操作系统静态路由导入。',
+      type: ForwardRuleType.Route,
+      protocol: ForwardProtocol.Tcp,
+      routeDestination: destination,
+      routeMask: cidrToMask(Number(prefixLength)),
+      routeGateway: row.systemRouteRule.nextHop
+    }
+  }
+  return undefined
 }
 
 function surfaceError(error: unknown) {
@@ -280,7 +448,16 @@ async function refreshRules() {
 async function refreshSystemRules() {
   systemLoading.value = true
   try {
-    systemPortProxyRules.value = await listSystemPortProxyRules()
+    const [portProxyRules, firewallRules, natMappings, routeRules] = await Promise.all([
+      listSystemPortProxyRules(),
+      listSystemFirewallRules(),
+      listSystemNatMappings(),
+      listSystemRoutes()
+    ])
+    systemPortProxyRules.value = portProxyRules
+    systemFirewallRules.value = firewallRules
+    systemNatMappings.value = natMappings
+    systemRouteRules.value = routeRules
   } finally {
     systemLoading.value = false
   }
@@ -345,10 +522,11 @@ function edit(row: DisplayRuleRow) {
 }
 
 async function importSystemRule(row: DisplayRuleRow) {
-  if (!row.systemRule) return
+  const input = inputFromSystemRow(row)
+  if (!input) return
   applyingKey.value = row.key
   try {
-    await createRule(inputFromSystemRule(row.systemRule))
+    await createRule(input)
     ElMessage.success('系统规则已保存到数据库。')
     await refreshDashboard()
   } catch (error) {
@@ -359,10 +537,11 @@ async function importSystemRule(row: DisplayRuleRow) {
 }
 
 async function disableImportedSystemRule(row: DisplayRuleRow) {
-  if (!row.systemRule) return
+  const input = inputFromSystemRow(row)
+  if (!input) return
   applyingKey.value = row.key
   try {
-    const created = await createRule(inputFromSystemRule(row.systemRule))
+    const created = await createRule(input)
     await disableRule(created.id)
     ElMessage.success('系统规则已入库并禁用。')
     await refreshDashboard()

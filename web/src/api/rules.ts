@@ -83,6 +83,32 @@ export interface SystemPortProxyRule {
   connectPort: number
 }
 
+export interface SystemFirewallRule {
+  displayName: string
+  enabled: string
+  direction: string
+  action: string
+  protocol: string
+  localPort: string
+}
+
+export interface SystemNatStaticMapping {
+  natName: string
+  protocol: string
+  externalIPAddress: string
+  externalPort: number
+  internalIPAddress: string
+  internalPort: number
+}
+
+export interface SystemRouteRule {
+  destinationPrefix: string
+  nextHop: string
+  routeMetric: number
+  interfaceAlias: string
+  policyStore: string
+}
+
 export async function listRules() {
   const { data } = await axios.get<ForwardRule[]>('/api/rules')
   return data
@@ -132,5 +158,20 @@ export async function showPortProxy() {
 
 export async function listSystemPortProxyRules() {
   const { data } = await axios.get<SystemPortProxyRule[]>('/api/portproxy/rules')
+  return data
+}
+
+export async function listSystemFirewallRules() {
+  const { data } = await axios.get<SystemFirewallRule[]>('/api/firewall/rules')
+  return data
+}
+
+export async function listSystemNatMappings() {
+  const { data } = await axios.get<SystemNatStaticMapping[]>('/api/nat/mappings')
+  return data
+}
+
+export async function listSystemRoutes() {
+  const { data } = await axios.get<SystemRouteRule[]>('/api/routes')
   return data
 }

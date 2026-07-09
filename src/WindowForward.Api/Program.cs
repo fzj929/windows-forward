@@ -101,6 +101,15 @@ app.MapGet("/api/portproxy", async (ForwardCommandService commandService) =>
 app.MapGet("/api/portproxy/rules", async (ForwardCommandService commandService) =>
     await commandService.GetPortProxyRulesAsync());
 
+app.MapGet("/api/firewall/rules", async (ForwardCommandService commandService) =>
+    await commandService.GetFirewallRulesAsync());
+
+app.MapGet("/api/nat/mappings", async (ForwardCommandService commandService) =>
+    await commandService.GetNatStaticMappingsAsync());
+
+app.MapGet("/api/routes", async (ForwardCommandService commandService) =>
+    await commandService.GetRouteRulesAsync());
+
 app.MapPost("/api/rules/validate", (ForwardRuleInput input, ForwardRuleValidator validator) =>
 {
     var result = validator.Validate(input);
@@ -193,7 +202,7 @@ app.MapPost("/api/rules/{id:int}/enable", async (int id, AppDbContext db, Forwar
         return Results.NotFound(ApiResponse.Fail("规则不存在。"));
     }
 
-    if (rule.Enabled && rule.Type != ForwardRuleType.PortProxy)
+    if (rule.Enabled && !HasSystemState(rule.Type))
     {
         return Results.Ok(ApiResponse.Ok(rule, "规则已经启用。"));
     }
@@ -220,7 +229,7 @@ app.MapPost("/api/rules/{id:int}/disable", async (int id, AppDbContext db, Forwa
         return Results.NotFound(ApiResponse.Fail("规则不存在。"));
     }
 
-    if (!rule.Enabled && rule.Type != ForwardRuleType.PortProxy)
+    if (!rule.Enabled && !HasSystemState(rule.Type))
     {
         return Results.Ok(ApiResponse.Ok(rule, "规则已经禁用。"));
     }
@@ -262,3 +271,6 @@ if (Directory.Exists(webRoot))
 }
 
 app.Run();
+
+static bool HasSystemState(ForwardRuleType type) =>
+    type is ForwardRuleType.PortProxy or ForwardRuleType.Firewall or ForwardRuleType.Nat or ForwardRuleType.Route;
