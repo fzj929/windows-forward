@@ -76,6 +76,13 @@ export interface CommandResult {
   commandText: string
 }
 
+export interface SystemPortProxyRule {
+  listenAddress: string
+  listenPort: number
+  connectAddress: string
+  connectPort: number
+}
+
 export async function listRules() {
   const { data } = await axios.get<ForwardRule[]>('/api/rules')
   return data
@@ -120,5 +127,10 @@ export async function listCommandLogs(take = 30) {
 
 export async function showPortProxy() {
   const { data } = await axios.get<ApiResponse<CommandResult>>('/api/portproxy')
+  return data
+}
+
+export async function listSystemPortProxyRules() {
+  const { data } = await axios.get<SystemPortProxyRule[]>('/api/portproxy/rules')
   return data
 }

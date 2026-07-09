@@ -98,6 +98,9 @@ app.MapGet("/api/portproxy", async (ForwardCommandService commandService) =>
         : Results.BadRequest(ApiResponse.Fail(result.Message, result));
 });
 
+app.MapGet("/api/portproxy/rules", async (ForwardCommandService commandService) =>
+    await commandService.GetPortProxyRulesAsync());
+
 app.MapPost("/api/rules/validate", (ForwardRuleInput input, ForwardRuleValidator validator) =>
 {
     var result = validator.Validate(input);
@@ -190,7 +193,7 @@ app.MapPost("/api/rules/{id:int}/enable", async (int id, AppDbContext db, Forwar
         return Results.NotFound(ApiResponse.Fail("规则不存在。"));
     }
 
-    if (rule.Enabled)
+    if (rule.Enabled && rule.Type != ForwardRuleType.PortProxy)
     {
         return Results.Ok(ApiResponse.Ok(rule, "规则已经启用。"));
     }
@@ -217,7 +220,7 @@ app.MapPost("/api/rules/{id:int}/disable", async (int id, AppDbContext db, Forwa
         return Results.NotFound(ApiResponse.Fail("规则不存在。"));
     }
 
-    if (!rule.Enabled)
+    if (!rule.Enabled && rule.Type != ForwardRuleType.PortProxy)
     {
         return Results.Ok(ApiResponse.Ok(rule, "规则已经禁用。"));
     }

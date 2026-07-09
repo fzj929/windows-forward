@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using WindowForward.Api.Data;
 using WindowForward.Api.Models;
 
 namespace WindowForward.Api.Services;
 
-public sealed class ForwardCommandService(AppDbContext db)
+public sealed partial class ForwardCommandService(AppDbContext db)
 {
     public static string BuildPreview(ForwardRuleInput rule) => string.Join(Environment.NewLine, BuildCommands(rule, true));
 
@@ -38,6 +39,38 @@ public sealed class ForwardCommandService(AppDbContext db)
         var result = await RunPowerShellAsync(new[] { "netsh interface portproxy show all" });
         await LogAsync(null, "系统 portproxy", "查看", result);
         return result;
+    }
+
+    public async Task<IReadOnlyList<SystemPortProxyRule>> GetPortProxyRulesAsync()
+    {
+        var result = await RunPowerShellAsync(new[] { "netsh interface portproxy show all" });
+        if (!result.Success)
+        {
+            return Array.Empty<SystemPortProxyRule>();
+        }
+
+        return ParsePortProxyRules(result.Output);
+    }
+
+    private static IReadOnlyList<SystemPortProxyRule> ParsePortProxyRules(string output)
+    {
+        var rules = new List<SystemPortProxyRule>();
+        foreach (var line in output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = WhitespaceRegex().Split(line.Trim());
+            if (parts.Length < 4 ||
+                !int.TryParse(parts[1], out var listenPort) ||
+                !int.TryParse(parts[3], out var connectPort) ||
+                !AddressRegex().IsMatch(parts[0]) ||
+                !AddressRegex().IsMatch(parts[2]))
+            {
+                continue;
+            }
+
+            rules.Add(new SystemPortProxyRule(parts[0], listenPort, parts[2], connectPort));
+        }
+
+        return rules;
     }
 
     private static IEnumerable<string> BuildCommands(ForwardRuleInput rule, bool enable)
@@ -189,6 +222,12 @@ public sealed class ForwardCommandService(AppDbContext db)
     private static string Q(string? value) => value ?? string.Empty;
 
     private static string Ps(string? value) => $"'{(value ?? string.Empty).Replace("'", "''")}'";
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRegex();
+
+    [GeneratedRegex(@"^[0-9a-fA-F:.]+$")]
+    private static partial Regex AddressRegex();
 }
 
 public sealed record CommandResult(
